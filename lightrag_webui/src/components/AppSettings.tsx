@@ -1,11 +1,14 @@
 import { useState, useCallback } from 'react'
+import type { FocusEvent } from 'react'
 import { Popover, PopoverContent, PopoverTrigger } from '@/components/ui/Popover'
 import Button from '@/components/ui/Button'
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/Select'
 import { useSettingsStore } from '@/stores/settings'
+import { useBackendState } from '@/stores/state'
 import { PaletteIcon } from 'lucide-react'
 import { useTranslation } from 'react-i18next'
 import { cn } from '@/lib/utils'
+import Input from '@/components/ui/Input'
 
 interface AppSettingsProps {
   className?: string
@@ -21,6 +24,10 @@ export default function AppSettings({ className }: AppSettingsProps) {
   const theme = useSettingsStore.use.theme()
   const setTheme = useSettingsStore.use.setTheme()
 
+  const workspace = useSettingsStore.use.workspace()
+  const setWorkspace = useSettingsStore.use.setWorkspace()
+  const workspaceRevision = useSettingsStore.use.workspaceRevision()
+
   const handleLanguageChange = useCallback((value: string) => {
     setLanguage(value as 'en' | 'zh' | 'fr' | 'ar' | 'zh_TW')
   }, [setLanguage])
@@ -28,6 +35,18 @@ export default function AppSettings({ className }: AppSettingsProps) {
   const handleThemeChange = useCallback((value: string) => {
     setTheme(value as 'light' | 'dark' | 'system')
   }, [setTheme])
+
+  const handleWorkspaceBlur = useCallback((event: FocusEvent<HTMLInputElement>) => {
+    const sanitized = event.target.value.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64)
+    event.target.value = sanitized
+
+    const currentWorkspace = useSettingsStore.getState().workspace
+    if (sanitized !== currentWorkspace) {
+      setWorkspace(sanitized)
+      // Trigger an immediate backend health check to refresh configuration context
+      Promise.resolve(useBackendState.getState().check()).catch(() => {})
+    }
+  }, [setWorkspace])
 
   return (
     <Popover open={opened} onOpenChange={setOpened}>
@@ -38,6 +57,19 @@ export default function AppSettings({ className }: AppSettingsProps) {
       </PopoverTrigger>
       <PopoverContent side="bottom" align="end" className="w-56">
         <div className="flex flex-col gap-4">
+          <div className="flex flex-col gap-2">
+            <label className="text-sm font-medium">{t('graphPanel.statusCard.workspace')}</label>
+            <Input
+              key={workspaceRevision}
+              defaultValue={workspace}
+              onBlur={handleWorkspaceBlur}
+              placeholder={t('header.workspacePlaceholder')}
+              maxLength={64}
+              className="h-9"
+              autoComplete="off"
+            />
+          </div>
+
           <div className="flex flex-col gap-2">
             <label className="text-sm font-medium">{t('settings.language')}</label>
             <Select value={language} onValueChange={handleLanguageChange}>

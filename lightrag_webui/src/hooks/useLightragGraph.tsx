@@ -475,6 +475,7 @@ const useLightrangeGraph = () => {
   const nodeToExpand = useGraphStore.use.nodeToExpand()
   const nodeToPrune = useGraphStore.use.nodeToPrune()
   const graphDataVersion = useGraphStore.use.graphDataVersion()
+  const workspaceRevision = useSettingsStore.use.workspaceRevision()
 
 
   // Use ref to track if data has been loaded and initial load
@@ -482,6 +483,7 @@ const useLightrangeGraph = () => {
   const initialLoadRef = useRef(false)
   // Use ref to track if empty data has been handled
   const emptyDataHandledRef = useRef(false)
+  const prevWorkspaceRevisionRef = useRef(workspaceRevision)
 
   const getNode = useCallback(
     (nodeId: string) => {
@@ -499,6 +501,26 @@ const useLightrangeGraph = () => {
 
   // Track if a fetch is in progress to prevent multiple simultaneous fetches
   const fetchInProgressRef = useRef(false)
+
+  useEffect(() => {
+    if (prevWorkspaceRevisionRef.current === workspaceRevision) {
+      return
+    }
+    prevWorkspaceRevisionRef.current = workspaceRevision
+
+    const state = useGraphStore.getState()
+    state.reset()
+    state.setGraphDataFetchAttempted(false)
+    state.setLabelsFetchAttempted(false)
+    state.setLastSuccessfulQueryLabel('')
+    state.setGraphIsEmpty(false)
+    dataLoadedRef.current = false
+    initialLoadRef.current = false
+    emptyDataHandledRef.current = false
+    fetchInProgressRef.current = false
+
+    state.incrementGraphDataVersion()
+  }, [workspaceRevision])
 
   // Reset graph when query label is cleared
   useEffect(() => {
@@ -661,7 +683,7 @@ const useLightrangeGraph = () => {
         state.setLastSuccessfulQueryLabel('') // Clear last successful query label on error
       })
     }
-  }, [queryLabel, maxQueryDepth, maxNodes, isFetching, t, graphDataVersion])
+  }, [queryLabel, maxQueryDepth, maxNodes, isFetching, t, graphDataVersion, workspaceRevision])
 
   // Handle node expansion
   useEffect(() => {

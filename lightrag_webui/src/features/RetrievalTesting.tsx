@@ -122,6 +122,14 @@ export default function RetrievalTesting() {
   // Smart switching logic: use Input for single line, Textarea for multi-line
   const hasMultipleLines = inputValue.includes('\n')
 
+  const workspaceRevision = useSettingsStore.use.workspaceRevision()
+
+  useEffect(() => {
+    setMessages([])
+    setInputValue('')
+    useSettingsStore.getState().setRetrievalHistory([])
+  }, [workspaceRevision])
+
   // Enhanced event handlers for smart switching
   const handleChange = useCallback((e: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => {
     setInputValue(e.target.value)

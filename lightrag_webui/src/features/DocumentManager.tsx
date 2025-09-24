@@ -210,6 +210,8 @@ export default function DocumentManager() {
   const setShowFileName = useSettingsStore.use.setShowFileName()
   const documentsPageSize = useSettingsStore.use.documentsPageSize()
   const setDocumentsPageSize = useSettingsStore.use.setDocumentsPageSize()
+  const workspace = useSettingsStore.use.workspace()
+  const workspaceRevision = useSettingsStore.use.workspaceRevision()
 
   // New pagination state
   const [currentPageDocs, setCurrentPageDocs] = useState<DocStatusResponse[]>([])
@@ -642,7 +644,8 @@ export default function DocumentManager() {
   // Intelligent refresh function: handles all boundary cases
   const handleIntelligentRefresh = useCallback(async (
     targetPage?: number, // Optional target page, defaults to current page
-    resetToFirst?: boolean // Whether to force reset to first page
+    resetToFirst?: boolean, // Whether to force reset to first page
+    statusFilterOverride?: StatusFilter
   ) => {
     try {
       if (!isMountedRef.current) return;
@@ -652,8 +655,10 @@ export default function DocumentManager() {
       // Determine target page
       const pageToFetch = resetToFirst ? 1 : (targetPage || pagination.page);
 
+      const effectiveStatusFilter = statusFilterOverride ?? statusFilter;
+
       const request: DocumentsRequest = {
-        status_filter: statusFilter === 'all' ? null : statusFilter,
+        status_filter: effectiveStatusFilter === 'all' ? null : effectiveStatusFilter,
         page: pageToFetch,
         page_size: pagination.page_size,
         sort_field: sortField,
@@ -676,15 +681,15 @@ export default function DocumentManager() {
 
         if (pageToFetch !== lastPage) {
           // Re-request last page
-          const lastPageRequest: DocumentsRequest = {
-            ...request,
-            page: lastPage
-          };
+        const lastPageRequest: DocumentsRequest = {
+          ...request,
+          page: lastPage
+        };
 
-          const lastPageResponse = await withTimeout(
-            getDocumentsPaginated(lastPageRequest),
-            30000,
-            'Document fetch timeout'
+        const lastPageResponse = await withTimeout(
+          getDocumentsPaginated(lastPageRequest),
+          30000,
+          'Document fetch timeout'
           );
 
           if (!isMountedRef.current) return;
@@ -719,19 +724,19 @@ export default function DocumentManager() {
         setIsRefreshing(false);
       }
     }
-  }, [statusFilter, pagination.page, pagination.page_size, sortField, sortDirection, t, updateComponentState, withTimeout, classifyError, recordFailure]);
+  }, [statusFilter, pagination.page, pagination.page_size, sortField, sortDirection, t, updateComponentState, withTimeout, classifyError, recordFailure, workspace]);
 
   // New paginated data fetching function
   const fetchPaginatedDocuments = useCallback(async (
     page: number,
     pageSize: number,
-    _statusFilter: StatusFilter // eslint-disable-line @typescript-eslint/no-unused-vars
+    statusFilterForFetch: StatusFilter
   ) => {
     // Update pagination state
     setPagination(prev => ({ ...prev, page, page_size: pageSize }));
 
     // Use intelligent refresh
-    await handleIntelligentRefresh(page);
+    await handleIntelligentRefresh(page, false, statusFilterForFetch);
   }, [handleIntelligentRefresh]);
 
   // Legacy fetchDocuments function for backward compatibility
@@ -1067,6 +1072,49 @@ export default function DocumentManager() {
     sortDirection,
     fetchPaginatedDocuments
   ]);
+
+  const prevWorkspaceRevisionRef = useRef(workspaceRevision)
+
+  useEffect(() => {
+    if (prevWorkspaceRevisionRef.current === workspaceRevision) {
+      return
+    }
+    prevWorkspaceRevisionRef.current = workspaceRevision
+
+    // Reset selection and pagination state
+    setSelectedDocIds([])
+    setStatusFilter('all')
+    setPageByStatus({
+      all: 1,
+      processed: 1,
+      processing: 1,
+      pending: 1,
+      failed: 1,
+    })
+    setPagination(prev => ({
+      ...prev,
+      page: 1,
+      total_count: 0,
+      total_pages: 0,
+      has_next: false,
+      has_prev: false
+    }))
+    setCurrentPageDocs([])
+    setDocs(null)
+    setStatusCounts({ all: 0 })
+
+    // Stop existing polling loop
+    clearPollingInterval()
+
+    // Fetch data for the new workspace
+    handleIntelligentRefresh(1, true, 'all')
+      .then(() => {
+        useBackendState.getState().check()
+      })
+      .catch((error) => {
+        console.error('Failed to refresh documents after workspace change:', error)
+      })
+  }, [workspaceRevision, handleIntelligentRefresh, clearPollingInterval])
 
   return (
     <Card className="!rounded-none !overflow-hidden flex flex-col h-full min-h-0">

@@ -10,6 +10,7 @@ type Tab = 'documents' | 'knowledge-graph' | 'retrieval' | 'api'
 
 interface SettingsState {
   workspace: string
+  workspaceRevision: number
   setWorkspace: (workspace: string) => void
   // Document manager settings
   showFileName: boolean
@@ -201,12 +202,21 @@ const useSettingsStoreBase = create<SettingsState>()(
       setDocumentsPageSize: (size: number) => set({ documentsPageSize: size }),
 
       workspace: '',
-      setWorkspace: (workspace: string) => set({ workspace }),
+      workspaceRevision: 0,
+      setWorkspace: (workspace: string) => set((state) => {
+        if (state.workspace === workspace) {
+          return {}
+        }
+        return {
+          workspace,
+          workspaceRevision: state.workspaceRevision + 1
+        }
+      }),
     }),
     {
       name: 'settings-storage',
       storage: createJSONStorage(() => localStorage),
-      version: 18,
+      version: 19,
       migrate: (state: any, version: number) => {
         if (version < 2) {
           state.showEdgeLabel = false
@@ -301,6 +311,9 @@ const useSettingsStoreBase = create<SettingsState>()(
         }
         if (version < 18) {
           state.workspace = state.workspace ?? ''
+        }
+        if (version < 19) {
+          state.workspaceRevision = 0
         }
         return state
       }

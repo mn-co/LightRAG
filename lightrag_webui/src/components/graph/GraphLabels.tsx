@@ -17,6 +17,7 @@ import { getPopularLabels, searchLabels } from '@/api/lightrag'
 const GraphLabels = () => {
   const { t } = useTranslation()
   const label = useSettingsStore.use.queryLabel()
+  const workspaceRevision = useSettingsStore.use.workspaceRevision()
   const [isRefreshing, setIsRefreshing] = useState(false)
   const [refreshTrigger, setRefreshTrigger] = useState(0)
   const [selectKey, setSelectKey] = useState(0)
@@ -53,6 +54,17 @@ const GraphLabels = () => {
 
     initializeHistory()
   }, [])
+
+  useEffect(() => {
+    // Clear cached history and invalidate fetch flags when workspace changes
+    SearchHistoryManager.clearHistory()
+    useGraphStore.getState().setGraphDataFetchAttempted(false)
+    useGraphStore.getState().setLabelsFetchAttempted(false)
+    useGraphStore.getState().incrementGraphDataVersion()
+
+    setRefreshTrigger(prev => prev + 1)
+    setSelectKey(prev => prev + 1)
+  }, [workspaceRevision])
 
   const fetchData = useCallback(
     async (query?: string): Promise<string[]> => {
