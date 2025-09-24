@@ -898,6 +898,8 @@ maxclients 500
 
 为了保持对遗留数据的兼容，在未配置工作空间时PostgreSQL非图存储的工作空间为`default`，PostgreSQL AGE图存储的工作空间为空，Neo4j图存储的默认工作空间为`base`。对于所有的外部存储，系统都提供了专用的工作空间环境变量，用于覆盖公共的 `WORKSPACE`环境变量配置。这些适用于指定存储类型的工作空间环境变量为：`REDIS_WORKSPACE`, `MILVUS_WORKSPACE`, `QDRANT_WORKSPACE`, `MONGODB_WORKSPACE`, `POSTGRES_WORKSPACE`, `NEO4J_WORKSPACE`。
 
+当 FastAPI 服务运行时，客户端可以在请求头中添加 `X-Workspace` 以切换目标工作区；如果未提供该请求头，则会使用服务器启动时设置的默认工作区。工作区名称仅允许使用字母、数字、下划线与连字符，长度不超过 64 个字符。
+
 ## 编辑实体和关系
 
 LightRAG现在支持全面的知识图谱管理功能，允许您在知识图谱中创建、编辑和删除实体和关系。

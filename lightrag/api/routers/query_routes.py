@@ -9,6 +9,8 @@ from typing import Any, Dict, List, Literal, Optional
 from fastapi import APIRouter, Depends, HTTPException
 from lightrag.base import QueryParam
 from lightrag.api.utils_api import get_combined_auth_dependency
+from lightrag.api.dependencies import get_workspace_context
+from lightrag.api.workspace import WorkspaceContext
 from pydantic import BaseModel, Field, field_validator
 
 from ascii_colors import trace_exception
@@ -145,13 +147,16 @@ class QueryDataResponse(BaseModel):
     )
 
 
-def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
+def create_query_routes(api_key: Optional[str] = None):
     combined_auth = get_combined_auth_dependency(api_key)
 
     @router.post(
         "/query", response_model=QueryResponse, dependencies=[Depends(combined_auth)]
     )
-    async def query_text(request: QueryRequest):
+    async def query_text(
+        request: QueryRequest,
+        context: WorkspaceContext = Depends(get_workspace_context),
+    ):
         """
         Handle a POST request at the /query endpoint to process user queries using RAG capabilities.
 
@@ -166,6 +171,8 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             HTTPException: Raised when an error occurs during the request handling process,
                        with status code 500 and detail containing the exception message.
         """
+        rag = context.rag
+
         try:
             param = request.to_query_params(False)
             response = await rag.aquery(request.query, param=param)
@@ -184,7 +191,10 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             raise HTTPException(status_code=500, detail=str(e))
 
     @router.post("/query/stream", dependencies=[Depends(combined_auth)])
-    async def query_text_stream(request: QueryRequest):
+    async def query_text_stream(
+        request: QueryRequest,
+        context: WorkspaceContext = Depends(get_workspace_context),
+    ):
         """
         This endpoint performs a retrieval-augmented generation (RAG) query and streams the response.
 
@@ -195,6 +205,8 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
         Returns:
             StreamingResponse: A streaming response containing the RAG query results.
         """
+        rag = context.rag
+
         try:
             param = request.to_query_params(True)
             response = await rag.aquery(request.query, param=param)
@@ -237,7 +249,10 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
         response_model=QueryDataResponse,
         dependencies=[Depends(combined_auth)],
     )
-    async def query_data(request: QueryRequest):
+    async def query_data(
+        request: QueryRequest,
+        context: WorkspaceContext = Depends(get_workspace_context),
+    ):
         """
         Retrieve structured data without LLM generation.
 
@@ -257,6 +272,8 @@ def create_query_routes(rag, api_key: Optional[str] = None, top_k: int = 60):
             HTTPException: Raised when an error occurs during the request handling process,
                          with status code 500 and detail containing the exception message.
         """
+        rag = context.rag
+
         try:
             param = request.to_query_params(False)  # No streaming for data endpoint
             response = await rag.aquery_data(request.query, param=param)

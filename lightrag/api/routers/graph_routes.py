@@ -9,6 +9,8 @@ from pydantic import BaseModel
 
 from lightrag.utils import logger
 from ..utils_api import get_combined_auth_dependency
+from lightrag.api.dependencies import get_workspace_context
+from lightrag.api.workspace import WorkspaceContext
 
 router = APIRouter(tags=["graph"])
 
@@ -25,17 +27,21 @@ class RelationUpdateRequest(BaseModel):
     updated_data: Dict[str, Any]
 
 
-def create_graph_routes(rag, api_key: Optional[str] = None):
+def create_graph_routes(api_key: Optional[str] = None):
     combined_auth = get_combined_auth_dependency(api_key)
 
     @router.get("/graph/label/list", dependencies=[Depends(combined_auth)])
-    async def get_graph_labels():
+    async def get_graph_labels(
+        context: WorkspaceContext = Depends(get_workspace_context),
+    ):
         """
         Get all graph labels
 
         Returns:
             List[str]: List of graph labels
         """
+        rag = context.rag
+
         try:
             return await rag.get_graph_labels()
         except Exception as e:
@@ -50,6 +56,7 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
         limit: int = Query(
             300, description="Maximum number of popular labels to return", ge=1, le=1000
         ),
+        context: WorkspaceContext = Depends(get_workspace_context),
     ):
         """
         Get popular labels by node degree (most connected entities)
@@ -60,6 +67,8 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
         Returns:
             List[str]: List of popular labels sorted by degree (highest first)
         """
+        rag = context.rag
+
         try:
             return await rag.chunk_entity_relation_graph.get_popular_labels(limit)
         except Exception as e:
@@ -75,6 +84,7 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
         limit: int = Query(
             50, description="Maximum number of search results to return", ge=1, le=100
         ),
+        context: WorkspaceContext = Depends(get_workspace_context),
     ):
         """
         Search labels with fuzzy matching
@@ -86,6 +96,8 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
         Returns:
             List[str]: List of matching labels sorted by relevance
         """
+        rag = context.rag
+
         try:
             return await rag.chunk_entity_relation_graph.search_labels(q, limit)
         except Exception as e:
@@ -100,6 +112,7 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
         label: str = Query(..., description="Label to get knowledge graph for"),
         max_depth: int = Query(3, description="Maximum depth of graph", ge=1),
         max_nodes: int = Query(1000, description="Maximum nodes to return", ge=1),
+        context: WorkspaceContext = Depends(get_workspace_context),
     ):
         """
         Retrieve a connected subgraph of nodes where the label includes the specified label.
@@ -115,6 +128,8 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
         Returns:
             Dict[str, List[str]]: Knowledge graph for label
         """
+        rag = context.rag
+
         try:
             # Log the label parameter to check for leading spaces
             logger.debug(
@@ -136,6 +151,7 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
     @router.get("/graph/entity/exists", dependencies=[Depends(combined_auth)])
     async def check_entity_exists(
         name: str = Query(..., description="Entity name to check"),
+        context: WorkspaceContext = Depends(get_workspace_context),
     ):
         """
         Check if an entity with the given name exists in the knowledge graph
@@ -146,6 +162,8 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
         Returns:
             Dict[str, bool]: Dictionary with 'exists' key indicating if entity exists
         """
+        rag = context.rag
+
         try:
             exists = await rag.chunk_entity_relation_graph.has_node(name)
             return {"exists": exists}
@@ -157,7 +175,10 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
             )
 
     @router.post("/graph/entity/edit", dependencies=[Depends(combined_auth)])
-    async def update_entity(request: EntityUpdateRequest):
+    async def update_entity(
+        request: EntityUpdateRequest,
+        context: WorkspaceContext = Depends(get_workspace_context),
+    ):
         """
         Update an entity's properties in the knowledge graph
 
@@ -167,6 +188,8 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
         Returns:
             Dict: Updated entity information
         """
+        rag = context.rag
+
         try:
             result = await rag.aedit_entity(
                 entity_name=request.entity_name,
@@ -191,7 +214,10 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
             )
 
     @router.post("/graph/relation/edit", dependencies=[Depends(combined_auth)])
-    async def update_relation(request: RelationUpdateRequest):
+    async def update_relation(
+        request: RelationUpdateRequest,
+        context: WorkspaceContext = Depends(get_workspace_context),
+    ):
         """Update a relation's properties in the knowledge graph
 
         Args:
@@ -200,6 +226,8 @@ def create_graph_routes(rag, api_key: Optional[str] = None):
         Returns:
             Dict: Updated relation information
         """
+        rag = context.rag
+
         try:
             result = await rag.aedit_relation(
                 source_entity=request.source_id,

@@ -13,6 +13,7 @@
     "api": "واجهة برمجة التطبيقات",
     "projectRepository": "مستودع المشروع",
     "logout": "تسجيل الخروج",
+    "workspacePlaceholder": "اتركه فارغًا للمساحة الافتراضية",
     "themeToggle": {
       "switchToLight": "التحويل إلى السمة الفاتحة",
       "switchToDark": "التحويل إلى السمة الداكنة"

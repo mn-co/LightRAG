@@ -267,6 +267,7 @@ const axiosInstance = axios.create({
 axiosInstance.interceptors.request.use((config) => {
   const apiKey = useSettingsStore.getState().apiKey
   const token = localStorage.getItem('LIGHTRAG-API-TOKEN');
+  const workspace = useSettingsStore.getState().workspace
 
   // Always include token if it exists, regardless of path
   if (token) {
@@ -274,6 +275,11 @@ axiosInstance.interceptors.request.use((config) => {
   }
   if (apiKey) {
     config.headers['X-API-Key'] = apiKey
+  }
+  if (workspace) {
+    config.headers['X-Workspace'] = workspace
+  } else {
+    delete config.headers['X-Workspace']
   }
   return config
 })

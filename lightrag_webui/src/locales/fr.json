@@ -13,6 +13,7 @@
     "api": "API",
     "projectRepository": "Référentiel du projet",
     "logout": "Déconnexion",
+    "workspacePlaceholder": "Vide = espace de travail par défaut",
     "themeToggle": {
       "switchToLight": "Passer au thème clair",
       "switchToDark": "Passer au thème sombre"

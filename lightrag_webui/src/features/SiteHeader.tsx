@@ -1,4 +1,6 @@
+import type { ChangeEvent } from 'react'
 import Button from '@/components/ui/Button'
+import Input from '@/components/ui/Input'
 import { SiteInfo, webuiPrefix } from '@/lib/constants'
 import AppSettings from '@/components/AppSettings'
 import { TabsList, TabsTrigger } from '@/components/ui/Tabs'
@@ -57,6 +59,8 @@ function TabsNavigation() {
 export default function SiteHeader() {
   const { t } = useTranslation()
   const { isGuestMode, coreVersion, apiVersion, username, webuiTitle, webuiDescription } = useAuthStore()
+  const workspace = useSettingsStore.use.workspace()
+  const setWorkspace = useSettingsStore.use.setWorkspace()
 
   const versionDisplay = (coreVersion && apiVersion)
     ? `${coreVersion}/${apiVersion}`
@@ -64,6 +68,11 @@ export default function SiteHeader() {
 
   const handleLogout = () => {
     navigationService.navigateToLogin();
+  }
+
+  const handleWorkspaceChange = (event: ChangeEvent<HTMLInputElement>) => {
+    const sanitized = event.target.value.replace(/[^A-Za-z0-9_-]/g, '').slice(0, 64)
+    setWorkspace(sanitized)
   }
 
   return (
@@ -96,6 +105,24 @@ export default function SiteHeader() {
 
       <div className="flex h-10 flex-1 items-center justify-center">
         <TabsNavigation />
+        <div className="ml-4 hidden items-center gap-2 md:flex">
+          <label
+            htmlFor="workspace-input"
+            className="text-xs text-muted-foreground"
+          >
+            {t('graphPanel.statusCard.workspace')}
+          </label>
+          <Input
+            id="workspace-input"
+            value={workspace}
+            onChange={handleWorkspaceChange}
+            placeholder={t('header.workspacePlaceholder')}
+            maxLength={64}
+            className="h-8 w-32 text-xs"
+            aria-label={t('graphPanel.statusCard.workspace')}
+            autoComplete="off"
+          />
+        </div>
         {isGuestMode && (
           <div className="ml-2 self-center px-2 py-1 text-xs bg-amber-100 text-amber-800 dark:bg-amber-900 dark:text-amber-200 rounded-md">
             {t('login.guestMode', 'Guest Mode')}

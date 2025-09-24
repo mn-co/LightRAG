@@ -50,6 +50,8 @@ from lightrag.api.routers.document_routes import (
 from lightrag.api.routers.query_routes import create_query_routes
 from lightrag.api.routers.graph_routes import create_graph_routes
 from lightrag.api.routers.ollama_api import OllamaAPI
+from lightrag.api.workspace import WorkspaceManager, WorkspaceContext
+from lightrag.api.dependencies import get_workspace_context
 
 from lightrag.utils import logger, set_verbose_debug
 from lightrag.kg.shared_storage import (
@@ -194,34 +196,6 @@ def create_app(args):
     # Check if API key is provided either through env var or args
     api_key = os.getenv("LIGHTRAG_API_KEY") or args.key
 
-    # Initialize document manager with workspace support for data isolation
-    doc_manager = DocumentManager(args.input_dir, workspace=args.workspace)
-
-    @asynccontextmanager
-    async def lifespan(app: FastAPI):
-        """Lifespan context manager for startup and shutdown events"""
-        # Store background tasks
-        app.state.background_tasks = set()
-
-        try:
-            # Initialize database connections
-            await rag.initialize_storages()
-            await initialize_pipeline_status()
-
-            # Data migration regardless of storage implementation
-            await rag.check_and_migrate_data()
-
-            ASCIIColors.green("\nServer is ready to accept connections! 🚀\n")
-
-            yield
-
-        finally:
-            # Clean up database connections
-            await rag.finalize_storages()
-
-            # Clean up shared data
-            finalize_share_data()
-
     # Initialize FastAPI
     app_kwargs = {
         "title": "LightRAG Server API",
@@ -235,7 +209,6 @@ def create_app(args):
         "openapi_url": "/openapi.json",  # Explicitly set OpenAPI schema URL
         "docs_url": "/docs",  # Explicitly set docs URL
         "redoc_url": "/redoc",  # Explicitly set redoc URL
-        "lifespan": lifespan,
     }
 
     # Configure Swagger UI parameters
@@ -244,55 +217,6 @@ def create_app(args):
         "persistAuthorization": True,
         "tryItOutEnabled": True,
     }
-
-    app = FastAPI(**app_kwargs)
-
-    # Add custom validation error handler for /query/data endpoint
-    @app.exception_handler(RequestValidationError)
-    async def validation_exception_handler(
-        request: Request, exc: RequestValidationError
-    ):
-        # Check if this is a request to /query/data endpoint
-        if request.url.path.endswith("/query/data"):
-            # Extract error details
-            error_details = []
-            for error in exc.errors():
-                field_path = " -> ".join(str(loc) for loc in error["loc"])
-                error_details.append(f"{field_path}: {error['msg']}")
-
-            error_message = "; ".join(error_details)
-
-            # Return in the expected format for /query/data
-            return JSONResponse(
-                status_code=400,
-                content={
-                    "status": "failure",
-                    "message": f"Validation error: {error_message}",
-                    "data": {},
-                    "metadata": {},
-                },
-            )
-        else:
-            # For other endpoints, return the default FastAPI validation error
-            return JSONResponse(status_code=422, content={"detail": exc.errors()})
-
-    def get_cors_origins():
-        """Get allowed origins from global_args
-        Returns a list of allowed origins, defaults to ["*"] if not set
-        """
-        origins_str = global_args.cors_origins
-        if origins_str == "*":
-            return ["*"]
-        return [origin.strip() for origin in origins_str.split(",")]
-
-    # Add CORS middleware
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=get_cors_origins(),
-        allow_credentials=True,
-        allow_methods=["*"],
-        allow_headers=["*"],
-    )
 
     # Create combined auth dependency for all endpoints
     combined_auth = get_combined_auth_dependency(api_key)
@@ -589,59 +513,143 @@ def create_app(args):
         name=args.simulated_model_name, tag=args.simulated_model_tag
     )
 
-    # Initialize RAG with unified configuration
-    try:
-        rag = LightRAG(
-            working_dir=args.working_dir,
-            workspace=args.workspace,
-            llm_model_func=create_llm_model_func(args.llm_binding),
-            llm_model_name=args.llm_model,
-            llm_model_max_async=args.max_async,
-            summary_max_tokens=args.summary_max_tokens,
-            summary_context_size=args.summary_context_size,
-            chunk_token_size=int(args.chunk_size),
-            chunk_overlap_token_size=int(args.chunk_overlap_size),
-            llm_model_kwargs=create_llm_model_kwargs(
-                args.llm_binding, args, llm_timeout
-            ),
-            embedding_func=embedding_func,
-            default_llm_timeout=llm_timeout,
-            default_embedding_timeout=embedding_timeout,
-            kv_storage=args.kv_storage,
-            graph_storage=args.graph_storage,
-            vector_storage=args.vector_storage,
-            doc_status_storage=args.doc_status_storage,
-            vector_db_storage_cls_kwargs={
-                "cosine_better_than_threshold": args.cosine_threshold
-            },
-            enable_llm_cache_for_entity_extract=args.enable_llm_cache_for_extract,
-            enable_llm_cache=args.enable_llm_cache,
-            rerank_model_func=rerank_model_func,
-            max_parallel_insert=args.max_parallel_insert,
-            max_graph_nodes=args.max_graph_nodes,
-            addon_params={
-                "language": args.summary_language,
-                "entity_types": args.entity_types,
-            },
-            ollama_server_infos=ollama_server_infos,
-        )
-    except Exception as e:
-        logger.error(f"Failed to initialize LightRAG: {e}")
-        raise
+    def create_document_manager(workspace_name: str) -> DocumentManager:
+        return DocumentManager(args.input_dir, workspace=workspace_name)
+
+    def build_light_rag(workspace_name: str) -> LightRAG:
+        try:
+            return LightRAG(
+                working_dir=args.working_dir,
+                workspace=workspace_name,
+                llm_model_func=create_llm_model_func(args.llm_binding),
+                llm_model_name=args.llm_model,
+                llm_model_max_async=args.max_async,
+                summary_max_tokens=args.summary_max_tokens,
+                summary_context_size=args.summary_context_size,
+                chunk_token_size=int(args.chunk_size),
+                chunk_overlap_token_size=int(args.chunk_overlap_size),
+                llm_model_kwargs=create_llm_model_kwargs(
+                    args.llm_binding, args, llm_timeout
+                ),
+                embedding_func=embedding_func,
+                default_llm_timeout=llm_timeout,
+                default_embedding_timeout=embedding_timeout,
+                kv_storage=args.kv_storage,
+                graph_storage=args.graph_storage,
+                vector_storage=args.vector_storage,
+                doc_status_storage=args.doc_status_storage,
+                vector_db_storage_cls_kwargs={
+                    "cosine_better_than_threshold": args.cosine_threshold
+                },
+                enable_llm_cache_for_entity_extract=args.enable_llm_cache_for_extract,
+                enable_llm_cache=args.enable_llm_cache,
+                rerank_model_func=rerank_model_func,
+                max_parallel_insert=args.max_parallel_insert,
+                max_graph_nodes=args.max_graph_nodes,
+                addon_params={
+                    "language": args.summary_language,
+                    "entity_types": args.entity_types,
+                },
+                ollama_server_infos=ollama_server_infos,
+            )
+        except Exception as e:
+            workspace_label = workspace_name or "<default>"
+            logger.error(
+                "Failed to initialize LightRAG for workspace '%s': %s",
+                workspace_label,
+                e,
+            )
+            raise
+
+    workspace_manager = WorkspaceManager(
+        create_rag=build_light_rag,
+        create_doc_manager=create_document_manager,
+        default_workspace=args.workspace or "",
+    )
+
+    @asynccontextmanager
+    async def lifespan(app: FastAPI):
+        """Lifespan context manager for startup and shutdown events"""
+
+        app.state.background_tasks = set()
+
+        try:
+            # Ensure the default workspace is initialized before serving requests
+            await workspace_manager.get_context(None)
+            await initialize_pipeline_status()
+
+            ASCIIColors.green("\nServer is ready to accept connections! 🚀\n")
+
+            yield
+        finally:
+            await workspace_manager.shutdown_all()
+            finalize_share_data()
+
+    app_kwargs["lifespan"] = lifespan
+    app = FastAPI(**app_kwargs)
+    app.state.workspace_manager = workspace_manager
+
+    # FastAPI application is created after the lifespan hook is configured
+
+    # Add custom validation error handler for /query/data endpoint
+    @app.exception_handler(RequestValidationError)
+    async def validation_exception_handler(
+        request: Request, exc: RequestValidationError
+    ):
+        # Check if this is a request to /query/data endpoint
+        if request.url.path.endswith("/query/data"):
+            # Extract error details
+            error_details = []
+            for error in exc.errors():
+                field_path = " -> ".join(str(loc) for loc in error["loc"])
+                error_details.append(f"{field_path}: {error['msg']}")
+
+            error_message = "; ".join(error_details)
+
+            # Return in the expected format for /query/data
+            return JSONResponse(
+                status_code=400,
+                content={
+                    "status": "failure",
+                    "message": f"Validation error: {error_message}",
+                    "data": {},
+                    "metadata": {},
+                },
+            )
+        else:
+            # For other endpoints, return the default FastAPI validation error
+            return JSONResponse(status_code=422, content={"detail": exc.errors()})
+
+    def get_cors_origins():
+        """Get allowed origins from global_args
+        Returns a list of allowed origins, defaults to ["*"] if not set
+        """
+        origins_str = global_args.cors_origins
+        if origins_str == "*":
+            return ["*"]
+        return [origin.strip() for origin in origins_str.split(",")]
+
+    # Add CORS middleware
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=get_cors_origins(),
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
 
     # Add routes
-    app.include_router(
-        create_document_routes(
-            rag,
-            doc_manager,
-            api_key,
-        )
-    )
-    app.include_router(create_query_routes(rag, api_key, args.top_k))
-    app.include_router(create_graph_routes(rag, api_key))
+    app.include_router(create_document_routes(api_key))
+    app.include_router(create_query_routes(api_key))
+    app.include_router(create_graph_routes(api_key))
 
     # Add Ollama API routes
-    ollama_api = OllamaAPI(rag, top_k=args.top_k, api_key=api_key)
+    ollama_api = OllamaAPI(
+        workspace_manager,
+        top_k=args.top_k,
+        api_key=api_key,
+        ollama_server_infos=ollama_server_infos,
+    )
     app.include_router(ollama_api.router, prefix="/api")
 
     @app.get("/")
@@ -715,10 +723,16 @@ def create_app(args):
         }
 
     @app.get("/health", dependencies=[Depends(combined_auth)])
-    async def get_status():
+    async def get_status(
+        context: WorkspaceContext = Depends(get_workspace_context),
+    ):
         """Get current system status"""
         try:
             pipeline_status = await get_namespace_data("pipeline_status")
+
+            workspace_name = context.workspace or workspace_manager.default_workspace
+            display_workspace = workspace_name or "<default>"
+            doc_manager = context.doc_manager
 
             if not auth_configured:
                 auth_mode = "disabled"
@@ -731,7 +745,7 @@ def create_app(args):
             return {
                 "status": "healthy",
                 "working_directory": str(args.working_dir),
-                "input_directory": str(args.input_dir),
+                "input_directory": str(doc_manager.input_dir),
                 "configuration": {
                     # LLM configuration binding/host address (if applicable)/model (if applicable)
                     "llm_binding": args.llm_binding,
@@ -749,7 +763,7 @@ def create_app(args):
                     "vector_storage": args.vector_storage,
                     "enable_llm_cache_for_extract": args.enable_llm_cache_for_extract,
                     "enable_llm_cache": args.enable_llm_cache,
-                    "workspace": args.workspace,
+                    "workspace": workspace_name,
                     "max_graph_nodes": args.max_graph_nodes,
                     # Rerank configuration
                     "enable_rerank": rerank_model_func is not None,
@@ -772,6 +786,10 @@ def create_app(args):
                 "auth_mode": auth_mode,
                 "pipeline_busy": pipeline_status.get("busy", False),
                 "keyed_locks": keyed_lock_info,
+                "active_workspace": display_workspace,
+                "loaded_workspaces": [
+                    ws or "<default>" for ws in workspace_manager.list_workspaces()
+                ],
                 "core_version": core_version,
                 "api_version": __api_version__,
                 "webui_title": webui_title,

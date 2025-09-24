@@ -939,6 +939,8 @@ The `workspace` parameter ensures data isolation between different LightRAG inst
 
 To maintain compatibility with legacy data, the default workspace for PostgreSQL non-graph storage is `default` and, for PostgreSQL AGE graph storage is null, for Neo4j graph storage is `base` when no workspace is configured. For all external storages, the system provides dedicated workspace environment variables to override the common `WORKSPACE` environment variable configuration. These storage-specific workspace environment variables are: `REDIS_WORKSPACE`, `MILVUS_WORKSPACE`, `QDRANT_WORKSPACE`, `MONGODB_WORKSPACE`, `POSTGRES_WORKSPACE`, `NEO4J_WORKSPACE`.
 
+When the FastAPI server is running, every request can target an individual workspace by providing the `X-Workspace` header. If the header is omitted, the server falls back to the default workspace configured at startup. Workspace names must contain only letters, numbers, underscores, or hyphens (maximum 64 characters).
+
 ## Edit Entities and Relations
 
 LightRAG now supports comprehensive knowledge graph management capabilities, allowing you to create, edit, and delete entities and relationships within your knowledge graph.

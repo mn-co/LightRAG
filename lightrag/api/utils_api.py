@@ -232,6 +232,12 @@ def display_splash_screen(args: argparse.Namespace) -> None:
     ASCIIColors.white("    └─ Input Directory: ", end="")
     ASCIIColors.yellow(f"{args.input_dir}")
 
+    ASCIIColors.magenta("\n🧩 Workspace Isolation:")
+    ASCIIColors.white("    ├─ Default Workspace: ", end="")
+    ASCIIColors.yellow(args.workspace or "<default>")
+    ASCIIColors.white("    └─ Override Header: ", end="")
+    ASCIIColors.yellow("X-Workspace: <name>")
+
     # LLM Configuration
     ASCIIColors.magenta("\n🤖 LLM Configuration:")
     ASCIIColors.white("    ├─ Binding: ", end="")
