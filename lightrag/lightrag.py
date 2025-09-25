@@ -1010,6 +1010,7 @@ class LightRAG:
         ids: list[str] | None = None,
         file_paths: str | list[str] | None = None,
         track_id: str | None = None,
+        enable_kg_list: list[bool] | None = None,
     ) -> str:
         """
         Pipeline for Processing Documents
@@ -1024,6 +1025,7 @@ class LightRAG:
             ids: list of unique document IDs, if not provided, MD5 hash IDs will be generated
             file_paths: list of file paths corresponding to each document, used for citation
             track_id: tracking ID for monitoring processing status, if not provided, will be generated with "enqueue" prefix
+            enable_kg_list: list of enable_kg flags for each document, defaults to True for all
 
         Returns:
             str: tracking ID for monitoring processing status
@@ -1050,6 +1052,14 @@ class LightRAG:
             # If no file paths provided, use placeholder
             file_paths = ["unknown_source"] * len(input)
 
+        # Handle enable_kg_list
+        if enable_kg_list is not None:
+            if len(enable_kg_list) != len(input):
+                # Fill missing enable_kg values with True (default)
+                enable_kg_list = enable_kg_list + [True] * (len(input) - len(enable_kg_list))
+        else:
+            enable_kg_list = [True] * len(input)
+
         # 1. Validate ids if provided or generate MD5 hash IDs and remove duplicate contents
         if ids is not None:
             # Check if the number of IDs matches the number of documents
@@ -1062,31 +1072,34 @@ class LightRAG:
 
             # Generate contents dict and remove duplicates in one pass
             unique_contents = {}
-            for id_, doc, path in zip(ids, input, file_paths):
+            id_to_enable_kg = {}
+            for id_, doc, path, enable_kg in zip(ids, input, file_paths, enable_kg_list):
                 cleaned_content = sanitize_text_for_encoding(doc)
                 if cleaned_content not in unique_contents:
                     unique_contents[cleaned_content] = (id_, path)
+                id_to_enable_kg[id_] = enable_kg
 
             # Reconstruct contents with unique content
             contents = {
-                id_: {"content": content, "file_path": file_path}
+                id_: {"content": content, "file_path": file_path, "enable_kg": id_to_enable_kg[id_]}
                 for content, (id_, file_path) in unique_contents.items()
             }
         else:
             # Clean input text and remove duplicates in one pass
-            unique_content_with_paths = {}
-            for doc, path in zip(input, file_paths):
+            unique_content_with_paths_kg = {}
+            for doc, path, enable_kg in zip(input, file_paths, enable_kg_list):
                 cleaned_content = sanitize_text_for_encoding(doc)
-                if cleaned_content not in unique_content_with_paths:
-                    unique_content_with_paths[cleaned_content] = path
+                if cleaned_content not in unique_content_with_paths_kg:
+                    unique_content_with_paths_kg[cleaned_content] = (path, enable_kg)
 
             # Generate contents dict of MD5 hash IDs and documents with paths
             contents = {
                 compute_mdhash_id(content, prefix="doc-"): {
                     "content": content,
                     "file_path": path,
+                    "enable_kg": enable_kg,
                 }
-                for content, path in unique_content_with_paths.items()
+                for content, (path, enable_kg) in unique_content_with_paths_kg.items()
             }
 
         # 2. Generate document initial status (without content)
@@ -1101,6 +1114,7 @@ class LightRAG:
                     "file_path"
                 ],  # Store file path in document status
                 "track_id": track_id,  # Store track_id in document status
+                "enable_kg": content_data["enable_kg"],  # Store enable_kg flag in document status
             }
             for id_, content_data in contents.items()
         }
@@ -1565,6 +1579,7 @@ class LightRAG:
                                             ).isoformat(),
                                             "file_path": file_path,
                                             "track_id": status_doc.track_id,  # Preserve existing track_id
+                                            "enable_kg": status_doc.enable_kg,  # Preserve existing enable_kg
                                             "metadata": {
                                                 "processing_start_time": processing_start_time
                                             },
@@ -1591,12 +1606,16 @@ class LightRAG:
                             await asyncio.gather(*first_stage_tasks)
 
                             # Stage 2: Process entity relation graph (after text_chunks are saved)
-                            entity_relation_task = asyncio.create_task(
-                                self._process_extract_entities(
-                                    chunks, pipeline_status, pipeline_status_lock
+                            # Only process entities if enable_kg is True
+                            if status_doc.enable_kg:
+                                entity_relation_task = asyncio.create_task(
+                                    self._process_extract_entities(
+                                        chunks, pipeline_status, pipeline_status_lock
+                                    )
                                 )
-                            )
-                            await entity_relation_task
+                                await entity_relation_task
+                            else:
+                                logger.info(f"Skipping knowledge graph construction for document {doc_id} (enable_kg=False)")
                             file_extraction_stage_ok = True
 
                         except Exception as e:
@@ -1651,24 +1670,28 @@ class LightRAG:
                         # Concurrency is controlled by keyed lock for individual entities and relationships
                         if file_extraction_stage_ok:
                             try:
-                                # Get chunk_results from entity_relation_task
-                                chunk_results = await entity_relation_task
-                                await merge_nodes_and_edges(
-                                    chunk_results=chunk_results,  # result collected from entity_relation_task
-                                    knowledge_graph_inst=self.chunk_entity_relation_graph,
-                                    entity_vdb=self.entities_vdb,
-                                    relationships_vdb=self.relationships_vdb,
-                                    global_config=asdict(self),
-                                    full_entities_storage=self.full_entities,
-                                    full_relations_storage=self.full_relations,
-                                    doc_id=doc_id,
-                                    pipeline_status=pipeline_status,
-                                    pipeline_status_lock=pipeline_status_lock,
-                                    llm_response_cache=self.llm_response_cache,
-                                    current_file_number=current_file_number,
-                                    total_files=total_files,
-                                    file_path=file_path,
-                                )
+                                # Only merge if knowledge graph construction was enabled
+                                if status_doc.enable_kg and entity_relation_task is not None:
+                                    # Get chunk_results from entity_relation_task
+                                    chunk_results = await entity_relation_task
+                                    await merge_nodes_and_edges(
+                                        chunk_results=chunk_results,  # result collected from entity_relation_task
+                                        knowledge_graph_inst=self.chunk_entity_relation_graph,
+                                        entity_vdb=self.entities_vdb,
+                                        relationships_vdb=self.relationships_vdb,
+                                        global_config=asdict(self),
+                                        full_entities_storage=self.full_entities,
+                                        full_relations_storage=self.full_relations,
+                                        doc_id=doc_id,
+                                        pipeline_status=pipeline_status,
+                                        pipeline_status_lock=pipeline_status_lock,
+                                        llm_response_cache=self.llm_response_cache,
+                                        current_file_number=current_file_number,
+                                        total_files=total_files,
+                                        file_path=file_path,
+                                    )
+                                else:
+                                    logger.info(f"Skipping merge stage for document {doc_id} (enable_kg=False)")
 
                                 # Record processing end time
                                 processing_end_time = int(time.time())
@@ -1687,6 +1710,7 @@ class LightRAG:
                                             ).isoformat(),
                                             "file_path": file_path,
                                             "track_id": status_doc.track_id,  # Preserve existing track_id
+                                            "enable_kg": status_doc.enable_kg,  # Preserve existing enable_kg
                                             "metadata": {
                                                 "processing_start_time": processing_start_time,
                                                 "processing_end_time": processing_end_time,
@@ -1739,6 +1763,7 @@ class LightRAG:
                                             "updated_at": datetime.now().isoformat(),
                                             "file_path": file_path,
                                             "track_id": status_doc.track_id,  # Preserve existing track_id
+                                            "enable_kg": status_doc.enable_kg,  # Preserve existing enable_kg
                                             "metadata": {
                                                 "processing_start_time": processing_start_time,
                                                 "processing_end_time": processing_end_time,

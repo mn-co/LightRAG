@@ -721,6 +721,8 @@ class DocProcessingStatus:
     """ISO format timestamp when document was created"""
     updated_at: str
     """ISO format timestamp when document was last updated"""
+    enable_kg: bool = True
+    """Whether to enable knowledge graph construction for this document"""
     track_id: str | None = None
     """Tracking ID for monitoring progress"""
     chunks_count: int | None = None

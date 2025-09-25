@@ -113,6 +113,8 @@ class JsonDocStatusStorage(DocStatusStorage):
                             data["metadata"] = {}
                         if "error_msg" not in data:
                             data["error_msg"] = None
+                        if "enable_kg" not in data:
+                            data["enable_kg"] = True
                         result[k] = DocProcessingStatus(**data)
                     except KeyError as e:
                         logger.error(
@@ -142,6 +144,8 @@ class JsonDocStatusStorage(DocStatusStorage):
                             data["metadata"] = {}
                         if "error_msg" not in data:
                             data["error_msg"] = None
+                        if "enable_kg" not in data:
+                            data["enable_kg"] = True
                         result[k] = DocProcessingStatus(**data)
                     except KeyError as e:
                         logger.error(
@@ -245,6 +249,8 @@ class JsonDocStatusStorage(DocStatusStorage):
                         data["metadata"] = {}
                     if "error_msg" not in data:
                         data["error_msg"] = None
+                    if "enable_kg" not in data:
+                        data["enable_kg"] = True
 
                     doc_status = DocProcessingStatus(**data)
 

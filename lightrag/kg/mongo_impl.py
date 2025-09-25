@@ -298,6 +298,8 @@ class MongoDocStatusStorage(DocStatusStorage):
             data["metadata"] = {}
         if "error_msg" not in data:
             data["error_msg"] = None
+        if "enable_kg" not in data:
+            data["enable_kg"] = True
         # Backward compatibility: migrate legacy 'error' field to 'error_msg'
         if "error" in data:
             if "error_msg" not in data or data["error_msg"] in (None, ""):

@@ -791,6 +791,8 @@ class RedisDocStatusStorage(DocStatusStorage):
                                             data["metadata"] = {}
                                         if "error_msg" not in data:
                                             data["error_msg"] = None
+                                        if "enable_kg" not in data:
+                                            data["enable_kg"] = True
 
                                         result[doc_id] = DocProcessingStatus(**data)
                                 except (json.JSONDecodeError, KeyError) as e:
@@ -847,6 +849,8 @@ class RedisDocStatusStorage(DocStatusStorage):
                                             data["metadata"] = {}
                                         if "error_msg" not in data:
                                             data["error_msg"] = None
+                                        if "enable_kg" not in data:
+                                            data["enable_kg"] = True
 
                                         result[doc_id] = DocProcessingStatus(**data)
                                 except (json.JSONDecodeError, KeyError) as e:
@@ -995,6 +999,8 @@ class RedisDocStatusStorage(DocStatusStorage):
                                         data["metadata"] = {}
                                     if "error_msg" not in data:
                                         data["error_msg"] = None
+                                    if "enable_kg" not in data:
+                                        data["enable_kg"] = True
 
                                     # Calculate sort key for sorting (but don't add to data)
                                     if sort_field == "id":

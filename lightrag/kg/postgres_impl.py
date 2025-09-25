@@ -2496,6 +2496,7 @@ class PGDocStatusStorage(DocStatusStorage):
                 metadata=metadata,
                 error_msg=element.get("error_msg"),
                 track_id=element.get("track_id"),
+                enable_kg=element.get("enable_kg", True),
             )
 
         return docs_by_status
@@ -2550,6 +2551,7 @@ class PGDocStatusStorage(DocStatusStorage):
                 track_id=element.get("track_id"),
                 metadata=metadata,
                 error_msg=element.get("error_msg"),
+                enable_kg=element.get("enable_kg", True),
             )
 
         return docs_by_track_id
@@ -2658,6 +2660,7 @@ class PGDocStatusStorage(DocStatusStorage):
                 track_id=element.get("track_id"),
                 metadata=metadata,
                 error_msg=element.get("error_msg"),
+                enable_kg=element.get("enable_kg", True),
             )
             documents.append((doc_id, doc_status))
 
@@ -4556,6 +4559,7 @@ TABLES = {
 	               track_id varchar(255) NULL,
 	               metadata JSONB NULL DEFAULT '{}'::jsonb,
 	               error_msg TEXT NULL,
+	               enable_kg BOOLEAN DEFAULT TRUE,
 	               created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 	               updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
 	               CONSTRAINT LIGHTRAG_DOC_STATUS_PK PRIMARY KEY (workspace, id)

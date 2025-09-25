@@ -16,6 +16,7 @@ from fastapi import (
     BackgroundTasks,
     Depends,
     File,
+    Header,
     HTTPException,
     UploadFile,
 )
@@ -359,6 +360,7 @@ class DocStatusResponse(BaseModel):
     status: DocStatus = Field(description="Current processing status")
     created_at: str = Field(description="Creation timestamp (ISO format string)")
     updated_at: str = Field(description="Last update timestamp (ISO format string)")
+    enable_kg: bool = Field(default=True, description="Whether knowledge graph construction is enabled for this document")
     track_id: Optional[str] = Field(
         default=None, description="Tracking ID for monitoring progress"
     )
@@ -833,7 +835,7 @@ def get_unique_filename_in_enqueued(target_dir: Path, original_name: str) -> str
 
 
 async def pipeline_enqueue_file(
-    rag: LightRAG, file_path: Path, track_id: str = None
+    rag: LightRAG, file_path: Path, track_id: str = None, enable_kg: bool = True
 ) -> tuple[bool, str]:
     """Add a file to the queue for processing
 
@@ -841,6 +843,7 @@ async def pipeline_enqueue_file(
         rag: LightRAG instance
         file_path: Path to the saved file
         track_id: Optional tracking ID, if not provided will be generated
+        enable_kg: Whether to enable knowledge graph construction
     Returns:
         tuple: (success: bool, track_id: str)
     """
@@ -1213,7 +1216,7 @@ async def pipeline_enqueue_file(
 
             try:
                 await rag.apipeline_enqueue_documents(
-                    content, file_paths=file_path.name, track_id=track_id
+                    content, file_paths=file_path.name, track_id=track_id, enable_kg_list=[enable_kg]
                 )
 
                 logger.info(
@@ -1297,17 +1300,18 @@ async def pipeline_enqueue_file(
                 logger.error(f"Error deleting file {file_path}: {str(e)}")
 
 
-async def pipeline_index_file(rag: LightRAG, file_path: Path, track_id: str = None):
+async def pipeline_index_file(rag: LightRAG, file_path: Path, track_id: str = None, enable_kg: bool = True):
     """Index a file with track_id
 
     Args:
         rag: LightRAG instance
         file_path: Path to the saved file
         track_id: Optional tracking ID
+        enable_kg: Whether to enable knowledge graph construction
     """
     try:
         success, returned_track_id = await pipeline_enqueue_file(
-            rag, file_path, track_id
+            rag, file_path, track_id, enable_kg
         )
         if success:
             await rag.apipeline_process_enqueue_documents()
@@ -1356,6 +1360,7 @@ async def pipeline_index_texts(
     texts: List[str],
     file_sources: List[str] = None,
     track_id: str = None,
+    enable_kg_list: List[bool] = None,
 ):
     """Index a list of texts with track_id
 
@@ -1364,6 +1369,7 @@ async def pipeline_index_texts(
         texts: The texts to index
         file_sources: Sources of the texts
         track_id: Optional tracking ID
+        enable_kg_list: List of enable_kg flags for each text
     """
     if not texts:
         return
@@ -1373,8 +1379,15 @@ async def pipeline_index_texts(
                 file_sources.append("unknown_source")
                 for _ in range(len(file_sources), len(texts))
             ]
+    if enable_kg_list is not None:
+        if len(enable_kg_list) != len(texts):
+            # Fill missing enable_kg values with True (default)
+            enable_kg_list = enable_kg_list + [True] * (len(texts) - len(enable_kg_list))
+    else:
+        enable_kg_list = [True] * len(texts)
+
     await rag.apipeline_enqueue_documents(
-        input=texts, file_paths=file_sources, track_id=track_id
+        input=texts, file_paths=file_sources, track_id=track_id, enable_kg_list=enable_kg_list
     )
     await rag.apipeline_process_enqueue_documents()
 
@@ -1703,7 +1716,8 @@ def create_document_routes(api_key: Optional[str] = None):
     async def upload_to_input_dir(
         background_tasks: BackgroundTasks,
         file: UploadFile = File(...),
-        rag_doc: tuple = Depends(get_rag_instance)
+        rag_doc: tuple = Depends(get_rag_instance),
+        x_enable_kg: Optional[bool] = Header(None, description="Enable knowledge graph construction for this document (defaults to True)")
     ):
         """
         Upload a file to the input directory and index it.
@@ -1715,6 +1729,7 @@ def create_document_routes(api_key: Optional[str] = None):
         Args:
             background_tasks: FastAPI BackgroundTasks for async processing
             file (UploadFile): The file to be uploaded. It must have an allowed extension.
+            x_enable_kg: Optional header to enable/disable knowledge graph construction (defaults to True)
 
         Returns:
             InsertResponse: A response object containing the upload status and a message.
@@ -1760,8 +1775,11 @@ def create_document_routes(api_key: Optional[str] = None):
 
             track_id = generate_track_id("upload")
 
+            # Handle enable_kg parameter (default to True if not provided)
+            enable_kg = x_enable_kg if x_enable_kg is not None else True
+
             # Add to background tasks and get track_id
-            background_tasks.add_task(pipeline_index_file, rag, file_path, track_id)
+            background_tasks.add_task(pipeline_index_file, rag, file_path, track_id, enable_kg)
 
             return InsertResponse(
                 status="success",
@@ -1780,7 +1798,8 @@ def create_document_routes(api_key: Optional[str] = None):
     async def insert_text(
         request: InsertTextRequest,
         background_tasks: BackgroundTasks,
-        rag_doc: tuple = Depends(get_rag_instance)
+        rag_doc: tuple = Depends(get_rag_instance),
+        x_enable_kg: Optional[bool] = Header(None, description="Enable knowledge graph construction for this document (defaults to True)")
     ):
         """
         Insert text into the RAG system.
@@ -1791,6 +1810,7 @@ def create_document_routes(api_key: Optional[str] = None):
         Args:
             request (InsertTextRequest): The request body containing the text to be inserted.
             background_tasks: FastAPI BackgroundTasks for async processing
+            x_enable_kg: Optional header to enable/disable knowledge graph construction (defaults to True)
 
         Returns:
             InsertResponse: A response object containing the status of the operation.
@@ -1822,12 +1842,16 @@ def create_document_routes(api_key: Optional[str] = None):
             # Generate track_id for text insertion
             track_id = generate_track_id("insert")
 
+            # Handle enable_kg parameter (default to True if not provided)
+            enable_kg = x_enable_kg if x_enable_kg is not None else True
+
             background_tasks.add_task(
                 pipeline_index_texts,
                 rag,
                 [request.text],
                 file_sources=[request.file_source],
                 track_id=track_id,
+                enable_kg_list=[enable_kg],
             )
 
             return InsertResponse(
@@ -1848,7 +1872,8 @@ def create_document_routes(api_key: Optional[str] = None):
     async def insert_texts(
         request: InsertTextsRequest,
         background_tasks: BackgroundTasks,
-        rag_doc: tuple = Depends(get_rag_instance)
+        rag_doc: tuple = Depends(get_rag_instance),
+        x_enable_kg: Optional[bool] = Header(None, description="Enable knowledge graph construction for all documents (defaults to True)")
     ):
         """
         Insert multiple texts into the RAG system.
@@ -1859,6 +1884,7 @@ def create_document_routes(api_key: Optional[str] = None):
         Args:
             request (InsertTextsRequest): The request body containing the list of texts.
             background_tasks: FastAPI BackgroundTasks for async processing
+            x_enable_kg: Optional header to enable/disable knowledge graph construction for all documents (defaults to True)
 
         Returns:
             InsertResponse: A response object containing the status of the operation.
@@ -1892,12 +1918,17 @@ def create_document_routes(api_key: Optional[str] = None):
             # Generate track_id for texts insertion
             track_id = generate_track_id("insert")
 
+            # Handle enable_kg parameter (default to True if not provided)
+            enable_kg = x_enable_kg if x_enable_kg is not None else True
+            enable_kg_list = [enable_kg] * len(request.texts)
+
             background_tasks.add_task(
                 pipeline_index_texts,
                 rag,
                 request.texts,
                 file_sources=request.file_sources,
                 track_id=track_id,
+                enable_kg_list=enable_kg_list,
             )
 
             return InsertResponse(
@@ -2246,6 +2277,7 @@ def create_document_routes(api_key: Optional[str] = None):
                             status=doc_status.status,
                             created_at=format_datetime(doc_status.created_at),
                             updated_at=format_datetime(doc_status.updated_at),
+                            enable_kg=doc_status.enable_kg,
                             track_id=doc_status.track_id,
                             chunks_count=doc_status.chunks_count,
                             error_msg=doc_status.error_msg,
@@ -2520,6 +2552,7 @@ def create_document_routes(api_key: Optional[str] = None):
                         status=doc_status.status,
                         created_at=format_datetime(doc_status.created_at),
                         updated_at=format_datetime(doc_status.updated_at),
+                        enable_kg=doc_status.enable_kg,
                         track_id=doc_status.track_id,
                         chunks_count=doc_status.chunks_count,
                         error_msg=doc_status.error_msg,
@@ -2603,6 +2636,7 @@ def create_document_routes(api_key: Optional[str] = None):
                         status=doc.status,
                         created_at=format_datetime(doc.created_at),
                         updated_at=format_datetime(doc.updated_at),
+                        enable_kg=doc.enable_kg,
                         track_id=doc.track_id,
                         chunks_count=doc.chunks_count,
                         error_msg=doc.error_msg,
