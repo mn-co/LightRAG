@@ -3,6 +3,8 @@ WorkspaceManager for managing multiple LightRAG instances with workspace isolati
 """
 
 import re
+import asyncio
+import copy
 from typing import Dict, Optional, List
 from threading import RLock
 
@@ -33,7 +35,8 @@ class WorkspaceManager:
         self.doc_manager_config = doc_manager_config
         self._instances: Dict[str, LightRAG] = {}
         self._doc_managers: Dict[str, DocumentManager] = {}
-        self._lock = RLock()
+        self._async_lock = asyncio.Lock()  # For async operations
+        self._sync_lock = RLock()  # For quick sync operations
 
         logger.info(f"WorkspaceManager initialized with default workspace: {default_workspace}")
 
@@ -90,11 +93,15 @@ class WorkspaceManager:
         if workspace is None:
             workspace = self.default_workspace
 
+        # Handle empty workspace name by mapping to "default" for backward compatibility
+        if not workspace or workspace.strip() == "":
+            workspace = "default"
+
         # Validate workspace name
         if not self.validate_workspace_name(workspace):
             raise ValueError(f"Invalid workspace name: {workspace}")
 
-        with self._lock:
+        async with self._async_lock:
             # Return existing instances if available
             if workspace in self._instances:
                 return self._instances[workspace], self._doc_managers[workspace]
@@ -102,8 +109,8 @@ class WorkspaceManager:
             # Create new instances
             logger.info(f"Creating new LightRAG instance for workspace: {workspace}")
 
-            # Create workspace-specific configuration
-            rag_config = self.rag_config.copy()
+            # Create workspace-specific configuration with deep copy to avoid sharing mutable objects
+            rag_config = copy.deepcopy(self.rag_config)
             rag_config['workspace'] = workspace
 
             # Create LightRAG instance
@@ -113,7 +120,7 @@ class WorkspaceManager:
             await rag_instance.initialize_storages()
 
             # Create DocumentManager instance with workspace support
-            doc_manager_config = self.doc_manager_config.copy()
+            doc_manager_config = copy.deepcopy(self.doc_manager_config)
             doc_manager = DocumentManager(**doc_manager_config, workspace=workspace)
 
             # Cache the instances
@@ -130,7 +137,7 @@ class WorkspaceManager:
         Returns:
             List[str]: List of workspace names
         """
-        with self._lock:
+        with self._sync_lock:
             return list(self._instances.keys())
 
     async def shutdown_workspace(self, workspace: str) -> bool:
@@ -143,7 +150,7 @@ class WorkspaceManager:
         Returns:
             bool: True if workspace was shutdown, False if not found
         """
-        with self._lock:
+        async with self._async_lock:
             if workspace not in self._instances:
                 return False
 
@@ -166,7 +173,7 @@ class WorkspaceManager:
         """
         Shutdown all workspace instances and clean up resources.
         """
-        with self._lock:
+        with self._sync_lock:
             workspaces = list(self._instances.keys())
 
         logger.info(f"Shutting down all workspaces: {workspaces}")
@@ -184,7 +191,7 @@ class WorkspaceManager:
         Returns:
             int: Number of workspaces
         """
-        with self._lock:
+        with self._sync_lock:
             return len(self._instances)
 
     def get_default_workspace(self) -> str:
