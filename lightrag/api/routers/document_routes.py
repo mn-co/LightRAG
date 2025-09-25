@@ -1660,16 +1660,19 @@ async def background_delete_documents(
                 logger.error(f"Error processing pending documents after deletion: {e}")
 
 
-def create_document_routes(
-    rag: LightRAG, doc_manager: DocumentManager, api_key: Optional[str] = None
-):
+def create_document_routes(api_key: Optional[str] = None):
+    from lightrag.api.dependencies import get_rag_instance, get_rag_only
+
     # Create combined auth dependency for document routes
     combined_auth = get_combined_auth_dependency(api_key)
 
     @router.post(
         "/scan", response_model=ScanResponse, dependencies=[Depends(combined_auth)]
     )
-    async def scan_for_new_documents(background_tasks: BackgroundTasks):
+    async def scan_for_new_documents(
+        background_tasks: BackgroundTasks,
+        rag_doc: tuple = Depends(get_rag_instance)
+    ):
         """
         Trigger the scanning process for new documents.
 
@@ -1680,6 +1683,9 @@ def create_document_routes(
         Returns:
             ScanResponse: A response object containing the scanning status and track_id
         """
+        from lightrag.api.dependencies import get_rag_instance
+        rag, doc_manager = rag_doc
+
         # Generate track_id with "scan" prefix for scanning operation
         track_id = generate_track_id("scan")
 
@@ -1695,7 +1701,9 @@ def create_document_routes(
         "/upload", response_model=InsertResponse, dependencies=[Depends(combined_auth)]
     )
     async def upload_to_input_dir(
-        background_tasks: BackgroundTasks, file: UploadFile = File(...)
+        background_tasks: BackgroundTasks,
+        file: UploadFile = File(...),
+        rag_doc: tuple = Depends(get_rag_instance)
     ):
         """
         Upload a file to the input directory and index it.
@@ -1715,7 +1723,9 @@ def create_document_routes(
         Raises:
             HTTPException: If the file type is not supported (400) or other errors occur (500).
         """
+        from lightrag.api.dependencies import get_rag_instance
         try:
+            rag, doc_manager = rag_doc
             # Sanitize filename to prevent Path Traversal attacks
             safe_filename = sanitize_filename(file.filename, doc_manager.input_dir)
 
@@ -1768,7 +1778,9 @@ def create_document_routes(
         "/text", response_model=InsertResponse, dependencies=[Depends(combined_auth)]
     )
     async def insert_text(
-        request: InsertTextRequest, background_tasks: BackgroundTasks
+        request: InsertTextRequest,
+        background_tasks: BackgroundTasks,
+        rag_doc: tuple = Depends(get_rag_instance)
     ):
         """
         Insert text into the RAG system.
@@ -1786,7 +1798,9 @@ def create_document_routes(
         Raises:
             HTTPException: If an error occurs during text processing (500).
         """
+        from lightrag.api.dependencies import get_rag_instance
         try:
+            rag, doc_manager = rag_doc
             # Check if file_source already exists in doc_status storage
             if (
                 request.file_source
@@ -1832,7 +1846,9 @@ def create_document_routes(
         dependencies=[Depends(combined_auth)],
     )
     async def insert_texts(
-        request: InsertTextsRequest, background_tasks: BackgroundTasks
+        request: InsertTextsRequest,
+        background_tasks: BackgroundTasks,
+        rag_doc: tuple = Depends(get_rag_instance)
     ):
         """
         Insert multiple texts into the RAG system.
@@ -1850,7 +1866,9 @@ def create_document_routes(
         Raises:
             HTTPException: If an error occurs during text processing (500).
         """
+        from lightrag.api.dependencies import get_rag_instance
         try:
+            rag, doc_manager = rag_doc
             # Check if any file_sources already exist in doc_status storage
             if request.file_sources:
                 for file_source in request.file_sources:
@@ -1895,7 +1913,9 @@ def create_document_routes(
     @router.delete(
         "", response_model=ClearDocumentsResponse, dependencies=[Depends(combined_auth)]
     )
-    async def clear_documents():
+    async def clear_documents(
+        rag_doc: tuple = Depends(get_rag_instance)
+    ):
         """
         Clear all documents from the RAG system.
 
@@ -1916,6 +1936,9 @@ def create_document_routes(
             HTTPException: Raised when a serious error occurs during the clearing process,
                           with status code 500 and error details in the detail field.
         """
+        from lightrag.api.dependencies import get_rag_instance
+        rag, doc_manager = rag_doc
+
         from lightrag.kg.shared_storage import (
             get_namespace_data,
             get_pipeline_status_lock,
@@ -2085,7 +2108,9 @@ def create_document_routes(
         dependencies=[Depends(combined_auth)],
         response_model=PipelineStatusResponse,
     )
-    async def get_pipeline_status() -> PipelineStatusResponse:
+    async def get_pipeline_status(
+        rag: LightRAG = Depends(get_rag_only)
+    ) -> PipelineStatusResponse:
         """
         Get the current status of the document indexing pipeline.
 
@@ -2109,6 +2134,7 @@ def create_document_routes(
         Raises:
             HTTPException: If an error occurs while retrieving pipeline status (500)
         """
+        from lightrag.api.dependencies import get_rag_only
         try:
             from lightrag.kg.shared_storage import (
                 get_namespace_data,
@@ -2176,7 +2202,9 @@ def create_document_routes(
     @router.get(
         "", response_model=DocsStatusesResponse, dependencies=[Depends(combined_auth)]
     )
-    async def documents() -> DocsStatusesResponse:
+    async def documents(
+        rag: LightRAG = Depends(get_rag_only)
+    ) -> DocsStatusesResponse:
         """
         Get the status of all documents in the system.
 
@@ -2191,6 +2219,7 @@ def create_document_routes(
         Raises:
             HTTPException: If an error occurs while retrieving document statuses (500).
         """
+        from lightrag.api.dependencies import get_rag_only
         try:
             statuses = (
                 DocStatus.PENDING,
@@ -2248,6 +2277,7 @@ def create_document_routes(
     async def delete_document(
         delete_request: DeleteDocRequest,
         background_tasks: BackgroundTasks,
+        rag_doc: tuple = Depends(get_rag_instance)
     ) -> DeleteDocByIdResponse:
         """
         Delete documents and all their associated data by their IDs using background processing.
@@ -2273,6 +2303,8 @@ def create_document_routes(
             HTTPException:
               - 500: If an unexpected internal error occurs during initialization.
         """
+        from lightrag.api.dependencies import get_rag_instance
+        rag, doc_manager = rag_doc
         doc_ids = delete_request.doc_ids
 
         # The rag object is initialized from the server startup args,
@@ -2323,7 +2355,10 @@ def create_document_routes(
         response_model=ClearCacheResponse,
         dependencies=[Depends(combined_auth)],
     )
-    async def clear_cache(request: ClearCacheRequest):
+    async def clear_cache(
+        request: ClearCacheRequest,
+        rag: LightRAG = Depends(get_rag_only)
+    ):
         """
         Clear all cache data from the LLM response cache storage.
 
@@ -2339,6 +2374,7 @@ def create_document_routes(
         Raises:
             HTTPException: If an error occurs during cache clearing (500).
         """
+        from lightrag.api.dependencies import get_rag_only
         try:
             # Call the aclear_cache method (no modes parameter)
             await rag.aclear_cache()
@@ -2357,7 +2393,10 @@ def create_document_routes(
         response_model=DeletionResult,
         dependencies=[Depends(combined_auth)],
     )
-    async def delete_entity(request: DeleteEntityRequest):
+    async def delete_entity(
+        request: DeleteEntityRequest,
+        rag: LightRAG = Depends(get_rag_only)
+    ):
         """
         Delete an entity and all its relationships from the knowledge graph.
 
@@ -2370,6 +2409,7 @@ def create_document_routes(
         Raises:
             HTTPException: If the entity is not found (404) or an error occurs (500).
         """
+        from lightrag.api.dependencies import get_rag_only
         try:
             result = await rag.adelete_by_entity(entity_name=request.entity_name)
             if result.status == "not_found":
@@ -2392,7 +2432,10 @@ def create_document_routes(
         response_model=DeletionResult,
         dependencies=[Depends(combined_auth)],
     )
-    async def delete_relation(request: DeleteRelationRequest):
+    async def delete_relation(
+        request: DeleteRelationRequest,
+        rag: LightRAG = Depends(get_rag_only)
+    ):
         """
         Delete a relationship between two entities from the knowledge graph.
 
@@ -2405,6 +2448,7 @@ def create_document_routes(
         Raises:
             HTTPException: If the relation is not found (404) or an error occurs (500).
         """
+        from lightrag.api.dependencies import get_rag_only
         try:
             result = await rag.adelete_by_relation(
                 source_entity=request.source_entity,
@@ -2430,7 +2474,10 @@ def create_document_routes(
         response_model=TrackStatusResponse,
         dependencies=[Depends(combined_auth)],
     )
-    async def get_track_status(track_id: str) -> TrackStatusResponse:
+    async def get_track_status(
+        track_id: str,
+        rag: LightRAG = Depends(get_rag_only)
+    ) -> TrackStatusResponse:
         """
         Get the processing status of documents by tracking ID.
 
@@ -2449,6 +2496,7 @@ def create_document_routes(
         Raises:
             HTTPException: If track_id is invalid (400) or an error occurs (500).
         """
+        from lightrag.api.dependencies import get_rag_only
         try:
             # Validate track_id
             if not track_id or not track_id.strip():
@@ -2506,6 +2554,7 @@ def create_document_routes(
     )
     async def get_documents_paginated(
         request: DocumentsRequest,
+        rag: LightRAG = Depends(get_rag_only)
     ) -> PaginatedDocsResponse:
         """
         Get documents with pagination support.
@@ -2526,6 +2575,7 @@ def create_document_routes(
         Raises:
             HTTPException: If an error occurs while retrieving documents (500).
         """
+        from lightrag.api.dependencies import get_rag_only
         try:
             # Get paginated documents and status counts in parallel
             docs_task = rag.doc_status.get_docs_paginated(
@@ -2591,7 +2641,9 @@ def create_document_routes(
         response_model=StatusCountsResponse,
         dependencies=[Depends(combined_auth)],
     )
-    async def get_document_status_counts() -> StatusCountsResponse:
+    async def get_document_status_counts(
+        rag: LightRAG = Depends(get_rag_only)
+    ) -> StatusCountsResponse:
         """
         Get counts of documents by status.
 
@@ -2604,6 +2656,7 @@ def create_document_routes(
         Raises:
             HTTPException: If an error occurs while retrieving status counts (500).
         """
+        from lightrag.api.dependencies import get_rag_only
         try:
             status_counts = await rag.doc_status.get_all_status_counts()
             return StatusCountsResponse(status_counts=status_counts)
